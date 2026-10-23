@@ -100,14 +100,21 @@ compose.desktop {
         mainClass = "app.vociferate.MainKt"
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Exe)
+            jvmArgs("-Djna.library.path=\$APPDIR/resources")
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Exe,
+                TargetFormat.AppImage
+            )
             packageName = "app.vociferate"
             packageVersion = "1.0.0"
 
             windows {
-                iconFile.set(project.file("src/jvmMain/resources/icon.ico"))
-
+                iconFile.set(project.file("src/jvmMain/resources/icon_vociferate.ico"))
+                appResourcesRootDir.set(project.file("desktop-resources"))
                 menu = true
+            }
+            linux {
+                iconFile.set(project.file("src/jvmMain/resources/icon_vociferate.png"))
+                appResourcesRootDir.set(project.file("desktop-resources"))
             }
         }
     }
