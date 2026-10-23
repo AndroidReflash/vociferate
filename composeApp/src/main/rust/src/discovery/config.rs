@@ -1,0 +1,1 @@
+pub const SERVICE_TYPE: &str = "_vociferate._udp.local.";
