@@ -224,6 +224,7 @@ impl GlobalSession {
             jitter_buffer.set_decoder(jitter_decoder);
 
             let mut audio_queue = VecDeque::with_capacity(FRAME_SAMPLES * 4);
+            let max_allowed_samples = FRAME_SAMPLES * 4; // Лимит очереди, чтобы избежать рассинхрона и гула
 
             let mut resampler: Option<FftFixedIn<f32>> = None;
             let mut interval = tokio::time::interval(Duration::from_millis(FRAME_SIZE_MS.into()));
@@ -236,7 +237,9 @@ impl GlobalSession {
 
                 match jitter_buffer.pop() {
                     Ok(pcm_chunk) => {
-                        audio_queue.extend(pcm_chunk);
+                        if !pcm_chunk.is_empty() {
+                            audio_queue.extend(pcm_chunk);
+                        }
                     }
                     Err(_) => {
                         // Если буфер пуст, ничего страшного, пойдем на тик таймера
@@ -250,6 +253,13 @@ impl GlobalSession {
                     _ = interval.tick() => {
                         let frames = FRAME_SAMPLES;
 
+                        // ЗАЩИТА: Если очередь разрослась из-за clock drift, сбрасываем излишек со старыми данными
+                        if audio_queue.len() > max_allowed_samples {
+                            let excess = audio_queue.len() - max_allowed_samples;
+                            audio_queue.drain(..excess);
+                            log::warn!("Audio queue overflow, dropping {} samples to prevent buzzing", excess);
+                        }
+
                         let pcm_filtered = if audio_queue.len() >= frames {
                             let mut chunk: Vec<f32> = audio_queue.drain(..frames).collect();
 
@@ -258,6 +268,8 @@ impl GlobalSession {
                             }
                             chunk
                         } else {
+                            // Underrun: данных не хватает, сбрасываем ресемплер во избежание залипания шума
+                            resampler = None;
                             vec![0.0f32; frames]
                         };
 
@@ -288,6 +300,7 @@ impl GlobalSession {
                                 Ok(output_channels) => output_channels[0].clone(),
                                 Err(e) => {
                                     log::error!("Ошибка ресемплирования вывода: {:?}", e);
+                                    resampler = None; // Сбрасываем сломанный ресемплер при ошибке
                                     pcm_filtered.clone()
                                 }
                             }
