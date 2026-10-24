@@ -24,7 +24,7 @@ pub fn find_compatible_config(device: &Device, config: &AudioConfig, kind: &str)
         let default_config = device.default_output_config()
             .map_err(|e| AudioError::Cpal { reason: e.to_string() })?;
 
-        log::info!("Используем чистый дефолт output: каналы={}, частота={}, формат={:?}",
+        log::info!("Используем чистый дефолт1 output: каналы={}, частота={}, формат={:?}",
             default_config.channels(),
             default_config.sample_rate().0,
             default_config.sample_format()

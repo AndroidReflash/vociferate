@@ -75,10 +75,7 @@ impl JitterBuffer {
                 }
             }
         } else {
-            match decoder.decode_plc() {
-                Ok(plc_vec) => plc_vec,
-                Err(_) => Vec::new(),
-            }
+            Vec::new()
         };
 
         Ok(pcm)

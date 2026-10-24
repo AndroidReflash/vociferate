@@ -127,6 +127,7 @@ impl GlobalSession {
     }
 
     pub async fn pub_start_playback(&self) -> Result<(), String> {
+        log::info!("заебало");
         self.stop_playback().await;
 
         let (jitter_tx, jitter_rx) = crossbeam_channel::unbounded();
@@ -224,7 +225,7 @@ impl GlobalSession {
             jitter_buffer.set_decoder(jitter_decoder);
 
             let mut audio_queue = VecDeque::with_capacity(FRAME_SAMPLES * 4);
-            let max_allowed_samples = FRAME_SAMPLES * 4; // Лимит очереди, чтобы избежать рассинхрона и гула
+            let max_allowed_samples = FRAME_SAMPLES * 4;
 
             let mut resampler: Option<FftFixedIn<f32>> = None;
             let mut interval = tokio::time::interval(Duration::from_millis(FRAME_SIZE_MS.into()));
@@ -253,11 +254,9 @@ impl GlobalSession {
                     _ = interval.tick() => {
                         let frames = FRAME_SAMPLES;
 
-                        // ЗАЩИТА: Если очередь разрослась из-за clock drift, сбрасываем излишек со старыми данными
                         if audio_queue.len() > max_allowed_samples {
                             let excess = audio_queue.len() - max_allowed_samples;
                             audio_queue.drain(..excess);
-                            log::warn!("Audio queue overflow, dropping {} samples to prevent buzzing", excess);
                         }
 
                         let pcm_filtered = if audio_queue.len() >= frames {
@@ -268,7 +267,6 @@ impl GlobalSession {
                             }
                             chunk
                         } else {
-                            // Underrun: данных не хватает, сбрасываем ресемплер во избежание залипания шума
                             resampler = None;
                             vec![0.0f32; frames]
                         };
@@ -276,7 +274,7 @@ impl GlobalSession {
                         let current_energy: f32 = pcm_filtered.iter().map(|x| x * x).sum::<f32>().sqrt() / (frames as f32).sqrt();
                         let _ = events_tx.send(SessionEvent::LevelOutput(current_energy));
 
-                        let mut input_channels = vec![vec![0.0f32; frames]; input_channels_count];
+                        let mut input_channels = vec![vec![0.005f32; frames]; input_channels_count];
                         for i in 0..frames {
                             input_channels[0][i] = pcm_filtered[i];
                         }
@@ -300,7 +298,7 @@ impl GlobalSession {
                                 Ok(output_channels) => output_channels[0].clone(),
                                 Err(e) => {
                                     log::error!("Ошибка ресемплирования вывода: {:?}", e);
-                                    resampler = None; // Сбрасываем сломанный ресемплер при ошибке
+                                    resampler = None;
                                     pcm_filtered.clone()
                                 }
                             }
@@ -311,14 +309,21 @@ impl GlobalSession {
                         let out_frames = resampled_mono.len();
                         let mut final_pcm = vec![0.0f32; out_frames * channels_count];
 
+                        let mut counter = 0;
                         for i in 0..out_frames {
                             let sample = resampled_mono[i].clamp(-0.99, 0.99);
+                            if sample != 0.0 {
+                                counter += 1;
+                            }
                             for ch in 0..channels_count {
                                 final_pcm[i * channels_count + ch] = sample;
                             }
                         }
 
-                        GlobalAudioOutput::global().write(&final_pcm);
+                        if counter > 0 {
+                            GlobalAudioOutput::global().write(&final_pcm);
+                        }
+
                     }
                 }
             }
