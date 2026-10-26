@@ -101,7 +101,7 @@ compose.desktop {
 
         nativeDistributions {
             // для создания appImage перенести .so в jvmMain/resources и раскомментировать эту строку
-            jvmArgs("-Djna.library.path=\$APPDIR/resources")
+          //  jvmArgs("-Djna.library.path=\$APPDIR/resources")
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Exe,
                 TargetFormat.AppImage
             )

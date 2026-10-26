@@ -1,4 +1,4 @@
-package app.maps.constants
+package constants
 
 sealed class ServiceConstantsStrings(val value: String) {
     data object ChannelId : ServiceConstantsStrings("vociferate-foreground")

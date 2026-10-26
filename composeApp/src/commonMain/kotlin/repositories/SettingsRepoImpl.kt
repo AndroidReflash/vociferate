@@ -2,7 +2,6 @@ package repositories
 
 import androidx.compose.ui.graphics.Color
 import constants.DatabaseValues
-import dataClasses.SoundDevices
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import repositories.interfaces.SettingsRepo
+import uniffi.vociferate_core.AudioConfig
 import uniffi.vociferate_core.AudioDevice
 import uniffi.vociferate_core.getBoolSetting
 import uniffi.vociferate_core.getStringSetting
@@ -17,10 +17,22 @@ import uniffi.vociferate_core.listAudioInputDevices
 import uniffi.vociferate_core.listAudioOutputDevices
 import uniffi.vociferate_core.setBoolSetting
 import uniffi.vociferate_core.setStringSetting
+import uniffi.vociferate_core.startListeningMicro
+import uniffi.vociferate_core.startSpeakers
 
 class SettingsRepoImpl(
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
 ): SettingsRepo {
+    override val defaultMircoConfig = AudioConfig(
+        sampleRate = 48000.toUInt(),
+        channels = 1.toUShort(),
+        bufferSize = 1024.toUInt()
+    )
+    override val defaultSpeakersConfig = AudioConfig(
+        sampleRate = 48000.toUInt(),
+        channels = 1.toUShort(),
+        bufferSize = 1024.toUInt()
+    )
     private val _theme = MutableStateFlow(true)
     private val theme : StateFlow<Boolean> = _theme
     private val _elementColor = MutableStateFlow(Color.Black)
@@ -46,11 +58,21 @@ class SettingsRepoImpl(
     override fun setInputDevice(device: AudioDevice){
         _inputDevice.value = device.id
         setStringSetting(DatabaseValues.InputDevice.value, device.id)
+        try {
+            startListeningMicro(device.id, defaultMircoConfig)
+        }catch (e: Exception){
+            println("плохое устройство")
+        }
     }
 
     override fun setOutputDevice(device: AudioDevice){
         _outputDevice.value = device.id
         setStringSetting(DatabaseValues.OutputDevice.value, device.id)
+        try {
+            startSpeakers(device.id, defaultSpeakersConfig)
+        }catch (e: Exception){
+            println("плохое устройство")
+        }
     }
     private val _inputDevices = MutableStateFlow(emptyList<AudioDevice>())
     override val inputDevices: StateFlow<List<AudioDevice>> = _inputDevices
@@ -61,6 +83,13 @@ class SettingsRepoImpl(
     private fun getDevices(){
         _inputDevices.value = listAudioInputDevices()
         _outputDevices.value = listAudioOutputDevices()
+    }
+
+    override fun setAudioListening(boolean: Boolean){
+        setBoolSetting(DatabaseValues.OutputDeviceListen.value, boolean)
+    }
+    override fun setMicroListening(boolean: Boolean){
+        setBoolSetting(DatabaseValues.InputDeviceListen.value, boolean)
     }
 
     init {

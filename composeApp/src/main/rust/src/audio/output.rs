@@ -95,7 +95,7 @@ impl AudioOutput {
             supported_config.sample_format(),
             stream_config.buffer_size
         );
-
+        log::error!("сам синглтон");
         GlobalAudioOutput::global().update_stream_info(stream_config.sample_rate.0, stream_config.channels);
 
         let (producer, consumer) = RingBuffer::new(RING_CAPACITY);
@@ -215,7 +215,7 @@ impl GlobalAudioOutput {
 
         output.start().map_err(|e| format!("Failed to start AudioOutput: {e:?}"))?;
         let control = output.control();
-
+        log::error!("ставим устройство вывода");
         let mut ctrl_lock = self.current_control.lock().unwrap();
         *ctrl_lock = Some(control);
 

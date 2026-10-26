@@ -127,7 +127,6 @@ impl GlobalSession {
     }
 
     pub async fn pub_start_playback(&self) -> Result<(), String> {
-        log::info!("заебало");
         self.stop_playback().await;
 
         let (jitter_tx, jitter_rx) = crossbeam_channel::unbounded();

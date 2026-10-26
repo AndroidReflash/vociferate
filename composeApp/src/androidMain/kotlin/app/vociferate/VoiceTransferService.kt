@@ -11,8 +11,8 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import app.maps.constants.ServiceConstantsInts
-import app.maps.constants.ServiceConstantsStrings
+import constants.ServiceConstantsInts
+import constants.ServiceConstantsStrings
 
 class VoiceTransferService: Service() {
     override fun onCreate() {
@@ -40,7 +40,7 @@ class VoiceTransferService: Service() {
                 0
             },
         )
-        println("askldqow")
+        println("сервис работает")
         return START_NOT_STICKY
     }
 

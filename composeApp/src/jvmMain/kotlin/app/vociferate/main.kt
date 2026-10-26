@@ -2,7 +2,7 @@ package app.vociferate
 
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
-import app.maps.di.platformModule
+import di.platformModule
 import org.koin.core.context.startKoin
 import uniffi.vociferate_core.initDatabase
 import uniffi.vociferate_core.initRustLogging

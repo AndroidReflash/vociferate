@@ -161,7 +161,7 @@ impl AudioInput {
         let connection_manager_arc = {
             let shared_conn = SHARED_CONNECTIONS.lock().unwrap();
             match shared_conn.as_ref() {
-                Some(cm) => cm.clone(), // Это Arc<ConnectionManager> (или Arc<Mutex<ConnectionManager>>)
+                Some(cm) => cm.clone(),
                 None => {
                     return Err(AudioError::DeviceUnavailable {
                         reason: "Discovery not started. Call start_discovery() first.".to_string()

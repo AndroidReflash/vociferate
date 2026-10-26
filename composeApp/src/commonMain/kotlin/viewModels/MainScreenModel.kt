@@ -40,6 +40,7 @@ class MainScreenModel(
                 deviceName.first { it != null }
                 discoverRepo.startDiscovery()
                 discoverRepo.startServerKotlin()
+                soundRepo.setDefaultInOut()
             }
         }
     }
