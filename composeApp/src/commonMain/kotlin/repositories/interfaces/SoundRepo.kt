@@ -8,5 +8,5 @@ interface SoundRepo {
     val state: StateFlow<SoundState>
     fun setListening()
     fun setAudio()
-    fun setDefaultInOut()
+    suspend fun setDefaultInOut()
 }

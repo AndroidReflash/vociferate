@@ -29,6 +29,7 @@ pub struct HeartbeatPayload {
     pub capabilities: Capabilities,
     pub session_id: u64,
     pub timestamp: u64,
+    pub is_active_micro: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +41,7 @@ pub struct DiscoveredPeer {
 
 pub struct GlobalDiscoverySender {
     socket: Arc<UdpSocket>,
+    pub payload: Mutex<Option<HeartbeatPayload>>,
     sender_handle: Mutex<Option<JoinHandle<()>>>,
     shutdown_tx: Mutex<Option<mpsc::Sender<()>>>,
 }
@@ -54,10 +56,20 @@ impl GlobalDiscoverySender {
             let socket = UdpSocket::from_std(std_socket).expect("Failed to convert std socket");
             Self {
                 socket: socket.into(),
+                payload: Mutex::new(None),
                 sender_handle: Mutex::new(None),
                 shutdown_tx: Mutex::new(None),
             }
         })
+    }
+
+    pub fn update_payload<F>(&self, f: F)
+    where
+        F: FnOnce(&mut HeartbeatPayload),
+    {
+        if let Some(payload) = self.payload.lock().unwrap().as_mut() {
+            f(payload);
+        }
     }
 
     pub fn start(&self, local_name: String, device_id: String, local_addr: SocketAddr, capabilities: Capabilities, session_id: u64) {
@@ -69,6 +81,17 @@ impl GlobalDiscoverySender {
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
         *self.shutdown_tx.lock().unwrap() = Some(shutdown_tx);
 
+        *self.payload.lock().unwrap() = Some(HeartbeatPayload {
+            device_name: local_name,
+            device_id,
+            ip: local_addr.ip().to_string(),
+            port: local_addr.port(),
+            capabilities,
+            session_id,
+            timestamp: 0,
+            is_active_micro: false
+        });
+
         let socket = self.socket.clone();
 
         let handle = tokio::spawn(async move {
@@ -78,23 +101,23 @@ impl GlobalDiscoverySender {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        let payload = HeartbeatPayload {
-                            device_name: local_name.clone(),
-                            device_id: device_id.clone(),
-                            ip: local_addr.ip().to_string(),
-                            port: local_addr.port(),
-                            capabilities: capabilities.clone(),
-                            session_id,
-                            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                        let current_payload = {
+                            let lock = Self::global().payload.lock().unwrap();
+                            lock.clone()
                         };
-                        match serde_json::to_vec(&payload) {
-                            Ok(data) => {
-                                if let Err(e) = socket.send_to(&data, bcast_addr).await {
-                                    warn!("Failed to send broadcast heartbeat: {}", e);
+
+                        if let Some(mut payload) = current_payload {
+                            payload.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+                            match serde_json::to_vec(&payload) {
+                                Ok(data) => {
+                                    if let Err(e) = socket.send_to(&data, bcast_addr).await {
+                                        warn!("Failed to send broadcast heartbeat: {}", e);
+                                    }
                                 }
-                            }
-                            Err(e) => {
-                                warn!("Failed to serialize heartbeat: {}", e);
+                                Err(e) => {
+                                    warn!("Failed to serialize heartbeat: {}", e);
+                                }
                             }
                         }
                     }
@@ -182,26 +205,50 @@ impl GlobalDiscoveryReceiver {
                                         capabilities: heartbeat.capabilities,
                                         session_id: heartbeat.session_id,
                                         hostname: heartbeat.device_name.clone(),
+                                        is_active_micro: heartbeat.is_active_micro,
                                     };
 
-                                    let is_new = {
+                                    // Проверяем, новый ли пир и изменилось ли у него что-то важное
+                                    let (is_new, has_changed) = {
                                         let mut peers_lock = peers_clone.lock().unwrap();
-                                        let is_new = !peers_lock.contains_key(&peer_id);
+                                        match peers_lock.get_mut(&peer_id) {
+                                            Some(existing) => {
+                                                // Сравниваем, изменился ли статус микрофона или имя
+                                                let changed = existing.info.is_active_micro != peer_info.is_active_micro
+                                                    || existing.info.name != peer_info.name;
 
-                                        peers_lock.insert(peer_id.clone(), DiscoveredPeer {
-                                            info: peer_info.clone(),
-                                            last_seen: Instant::now(),
-                                        });
+                                                // Обновляем данные и время последней активности
+                                                existing.info = peer_info.clone();
+                                                existing.last_seen = Instant::now();
 
-                                        is_new
+                                                (false, changed)
+                                            }
+                                            None => {
+                                                // Совсем новый пир
+                                                peers_lock.insert(peer_id.clone(), DiscoveredPeer {
+                                                    info: peer_info.clone(),
+                                                    last_seen: Instant::now(),
+                                                });
+                                                (true, false)
+                                            }
+                                        }
                                     };
 
+                                    // Отправляем соответствующие события в Kotlin
                                     if is_new {
                                         let uniffi_peer = UniffiPeerInfo::from(&peer_info);
                                         info!("Новый пир обнаружен: {:?}", uniffi_peer);
 
                                         let _ = crate::uniffi_exports::callback_discovery::DISCOVERY_CHANNEL.0.send(
                                             crate::uniffi_exports::callback_discovery::DiscoveryEvent::PeersAdded(vec![uniffi_peer])
+                                        );
+                                    } else if has_changed {
+                                        let uniffi_peer = UniffiPeerInfo::from(&peer_info);
+                                        info!("Пир обновил данные (микрофон/имя): {:?}", uniffi_peer);
+
+                                        // Нам понадобится добавить PeersUpdated в DiscoveryEvent в Rust/UniFFI
+                                        let _ = crate::uniffi_exports::callback_discovery::DISCOVERY_CHANNEL.0.send(
+                                            crate::uniffi_exports::callback_discovery::DiscoveryEvent::PeersUpdated(vec![uniffi_peer])
                                         );
                                     }
                                 }

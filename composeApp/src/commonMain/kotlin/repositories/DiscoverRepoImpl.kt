@@ -30,7 +30,7 @@ class DiscoverRepoImpl(
     private val defaultServerPort = "19090"
 
     override suspend fun startDiscovery(){
-        mutableState.update { it.copy(devices = emptyList(), isDiscovering = false, errorMessage = null) }
+        mutableState.update { it.copy(devicesList = emptyMap(), isDiscovering = false, errorMessage = null) }
 
         val result = runCatching { uniffi.vociferate_core.startDiscovery() }
         result.fold(
@@ -57,50 +57,60 @@ class DiscoverRepoImpl(
                         val event = nextDiscoveryEvent() ?: break
 
                         mutableState.update { state ->
+                            val currentMap = state.devicesList.toMutableMap()
                             when (event) {
-                                is DiscoveryEvent.PeersAdded -> {
-                                    val newDevices = event.v1.map(PeerInfo::toDevice)
-                                    val existingIds = newDevices.map { it.id }.toSet()
-                                    val filteredCurrent = state.devices.filter { it.id !in existingIds }
-                                    state.copy(devices = filteredCurrent + newDevices)
+                                is DiscoveryEvent.PeersAdded,
+                                is DiscoveryEvent.PeersUpdated -> {
+                                    val peerList = when (event) {
+                                        is DiscoveryEvent.PeersAdded -> event.v1
+                                        is DiscoveryEvent.PeersUpdated -> event.v1
+                                        else -> emptyList()
+                                    }
+
+                                    for (peer in peerList) {
+                                        val device = peer.toDevice()
+                                        val existing = currentMap[device.id]
+                                        currentMap[device.id] = device.copy(
+                                            isSelected = existing?.isSelected ?: false
+                                        )
+                                    }
                                 }
                                 is DiscoveryEvent.PeersRemoved -> {
-                                    val removeSet = event.v1.toSet()
-                                    state.copy(devices = state.devices.filter { it.id !in removeSet })
+                                    for (id in event.v1) {
+                                        currentMap.remove(id)
+                                    }
                                 }
                             }
+                            state.copy(devicesList = currentMap)
                         }
                     }
                 }
+
                 // тут прилетает метка активности соединения для устройства в списке обнаруженных
                 launch {
-                    while(isActive){
+                    while (isActive) {
                         val event = nextConnectionEvent() ?: break
-                        when (event) {
-                            is ConnectionEvent.Connected -> {
-                                mutableState.update {
-                                    it.copy(
-                                        devices = it.devices.map { device ->
-                                            if (device.id == event.v1.id) device.copy(isSelected = true) else device
-                                        }
-                                    )
+                        mutableState.update { state ->
+                            val currentMap = state.devicesList.toMutableMap()
+                            when (event) {
+                                is ConnectionEvent.Connected -> {
+                                    currentMap[event.v1.id]?.let { device ->
+                                        currentMap[event.v1.id] = device.copy(isSelected = true)
+                                    }
+                                }
+                                is ConnectionEvent.Disconnected -> {
+                                    currentMap[event.v1]?.let { device ->
+                                        currentMap[event.v1] = device.copy(isSelected = false)
+                                    }
+                                }
+                                is ConnectionEvent.Error -> {
+                                    println("ошибка соединения")
+                                }
+                                is ConnectionEvent.AudioData -> {
+                                    // Если у тебя в AudioData прилетает инфа или ты хочешь как-то реагировать
                                 }
                             }
-                            is ConnectionEvent.Disconnected -> {
-                                mutableState.update {
-                                    it.copy(
-                                        devices = it.devices.map { device ->
-                                            if (device.id == event.v1) device.copy(isSelected = false) else device
-                                        }
-                                    )
-                                }
-                            }
-                            is ConnectionEvent.Error -> {
-                                println("ошибка")
-                            }
-                            is ConnectionEvent.AudioData -> {
-                                println("звук на котлин ${event.v1}")
-                            }
+                            state.copy(devicesList = currentMap)
                         }
                     }
                 }
@@ -126,6 +136,7 @@ class DiscoverRepoImpl(
                 ip = device.address,
                 port = defaultServerPort.toUShort(),
                 hostname = device.name,
+                isActiveMicro = device.sayingSomething
             )
             connectToPeer(peerInfo)
         }
@@ -143,4 +154,5 @@ private fun PeerInfo.toDevice(): DiscoveredDevice = DiscoveredDevice(
     address = ip,
     port = port.toInt(),
     isSelected = false,
+    sayingSomething = isActiveMicro
 )

@@ -22,5 +22,7 @@ interface SettingsRepo {
     fun setMicroListening(boolean: Boolean)
     fun setInputDevice(device: AudioDevice)
     fun setOutputDevice(device: AudioDevice)
+    fun setOutputDefault()
+    fun setInputDefault()
     fun setTheme()
 }

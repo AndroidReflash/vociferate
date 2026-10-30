@@ -1,5 +1,6 @@
 package platform
 
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -17,18 +18,18 @@ class BottomLayoutImpl: BottomLayout {
         elementColor: Color,
         onNavigate: () -> Unit,
     ) {
-//        Surface(
-//            onClick = { onNavigate() },
-//            shape = CircleShape,
-//            color = Color.Transparent,
-//            modifier = Modifier.size(44.dp),
-//        ){
-//            // кнопка настроек
-//            Icon(
-//                imageVector = Icons.Outlined.Settings,
-//                contentDescription = "Настройки",
-//                tint = elementColor,
-//            )
-//        }
+        Surface(
+            onClick = { onNavigate() },
+            shape = CircleShape,
+            color = Color.Transparent,
+            modifier = Modifier.size(44.dp).padding(11.dp),
+        ){
+            // кнопка настроек
+            Icon(
+                imageVector = Icons.Outlined.Settings,
+                contentDescription = "Настройки",
+                tint = elementColor,
+            )
+        }
     }
 }

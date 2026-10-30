@@ -67,6 +67,9 @@ fun SettingsScreen(
             devices = inputDevices,
             onDeviceClick = {
                 viewModel.setInputDevice(it)
+            },
+            onDefault = {
+                viewModel.setInputDefault()
             }
         )
 
@@ -80,6 +83,9 @@ fun SettingsScreen(
             devices = outputDevices,
             onDeviceClick = {
                 viewModel.setOutputDevice(it)
+            },
+            onDefault = {
+                viewModel.setOutputDefault()
             }
         )
     }

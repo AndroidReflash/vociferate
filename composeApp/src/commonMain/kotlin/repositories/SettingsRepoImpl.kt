@@ -4,13 +4,16 @@ import androidx.compose.ui.graphics.Color
 import constants.DatabaseValues
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import repositories.interfaces.SettingsRepo
 import uniffi.vociferate_core.AudioConfig
 import uniffi.vociferate_core.AudioDevice
+import uniffi.vociferate_core.deleteSetting
 import uniffi.vociferate_core.getBoolSetting
 import uniffi.vociferate_core.getStringSetting
 import uniffi.vociferate_core.listAudioInputDevices
@@ -74,6 +77,27 @@ class SettingsRepoImpl(
             println("плохое устройство")
         }
     }
+
+    override fun setInputDefault() {
+        _inputDevice.value = null
+        deleteSetting(DatabaseValues.InputDevice.value)
+        try {
+            startListeningMicro(null, defaultMircoConfig)
+        }catch (e: Exception){
+            println("плохое устройство")
+        }
+    }
+
+    override fun setOutputDefault() {
+        _outputDevice.value = null
+        deleteSetting(DatabaseValues.OutputDevice.value)
+        try {
+            startSpeakers(null, defaultSpeakersConfig)
+        }catch (e: Exception){
+            println("плохое устройство")
+        }
+    }
+
     private val _inputDevices = MutableStateFlow(emptyList<AudioDevice>())
     override val inputDevices: StateFlow<List<AudioDevice>> = _inputDevices
 
@@ -103,7 +127,10 @@ class SettingsRepoImpl(
             }
             launch {
                 withContext(Dispatchers.IO) {
-                    getDevices()
+                    while (isActive){
+                        getDevices()
+                        delay(1000)
+                    }
                 }
             }
             launch {

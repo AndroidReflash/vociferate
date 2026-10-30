@@ -8,4 +8,5 @@ pub struct HandshakePayload {
     pub capabilities: Capabilities,
     pub session_id: u64,
     pub device_id: String,
+    pub is_active_micro: bool
 }

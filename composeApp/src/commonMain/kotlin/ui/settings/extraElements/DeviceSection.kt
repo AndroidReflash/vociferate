@@ -37,7 +37,8 @@ fun DeviceSection(
     selected: String?,
     title: String,
     devices: List<AudioDevice>,
-    onDeviceClick: (AudioDevice) -> Unit
+    onDeviceClick: (AudioDevice) -> Unit,
+    onDefault: () -> Unit
 ) {
     val scroll = rememberScrollState()
     var expanded by remember { mutableStateOf(false) }
@@ -83,6 +84,12 @@ fun DeviceSection(
                     .verticalScroll(scroll),
                 horizontalAlignment = Alignment.CenterHorizontally
             ){
+                DefaultSetting(
+                    textColor = textColor,
+                    color = color,
+                    selected = selected,
+                    onClick = { onDefault() }
+                )
                 devices.forEach { device ->
                     DeviceItem(
                         textColor = textColor,

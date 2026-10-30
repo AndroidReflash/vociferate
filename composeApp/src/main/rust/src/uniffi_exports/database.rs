@@ -85,3 +85,10 @@ pub fn get_string_setting(key: String) -> Result<Option<String>, VoiceError> {
     db.get(key)
         .map_err(|e| VoiceError::Other(e.to_string()))
 }
+
+#[uniffi::export]
+pub fn delete_setting(key: String) -> Result<(), VoiceError> {
+    let db = get_db()?;
+    db.delete(key)
+        .map_err(|e| VoiceError::Other(e.to_string()))
+}

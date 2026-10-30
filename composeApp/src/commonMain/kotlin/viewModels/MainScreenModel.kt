@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import repositories.interfaces.DiscoverRepo
 import repositories.interfaces.SettingsRepo
 import repositories.interfaces.SoundRepo
@@ -36,8 +37,8 @@ class MainScreenModel(
 
     init {
         viewModelScope.launch {
-            viewModelScope.launch {
-                deviceName.first { it != null }
+            deviceName.first { it != null }
+            withContext(Dispatchers.IO){
                 discoverRepo.startDiscovery()
                 discoverRepo.startServerKotlin()
                 soundRepo.setDefaultInOut()

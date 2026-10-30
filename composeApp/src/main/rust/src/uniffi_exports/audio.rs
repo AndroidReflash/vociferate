@@ -12,6 +12,7 @@ use log::{info, error};
 use crate::audio::GlobalAudioOutput;
 use crate::audio::input::GlobalAudioInput;
 use crate::session::GlobalSession;
+use crate::discovery::GlobalDiscoverySender;
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     Runtime::new().expect("Failed to create Tokio runtime")
@@ -67,11 +68,13 @@ pub fn start_listening_micro(
     config: AudioConfig,
 ) -> Result<(), VoiceError> {
     RUNTIME.block_on(async move {
-        let _ = GlobalAudioInput::global().stop();
         let _ = GlobalAudioInput::global()
             .set_device(device_id, config)
             .map_err(|e| VoiceError::Audio(e))?;
         let _ = GlobalAudioInput::global().start();
+        let _ = GlobalDiscoverySender::global().update_payload(|payload| {
+                    payload.is_active_micro = true;
+                });
         Ok(())
     })
 }
@@ -80,6 +83,9 @@ pub fn start_listening_micro(
 pub fn stop_listening_micro() -> Result<(), VoiceError> {
     RUNTIME.block_on(async move {
         let _ = GlobalAudioInput::global().stop();
+        let _ = GlobalDiscoverySender::global().update_payload(|payload| {
+                            payload.is_active_micro = false;
+                        });
         Ok(())
     })
 }

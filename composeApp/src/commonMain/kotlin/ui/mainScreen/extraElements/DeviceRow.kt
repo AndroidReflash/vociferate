@@ -1,15 +1,17 @@
 package ui.mainScreen.extraElements
 
+import TalkingIcon
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -22,9 +24,9 @@ fun DeviceRow(
     onConnect: (DiscoveredDevice) -> Unit,
     onDisconnect: (DiscoveredDevice) -> Unit,
     elementColor: Color,
-    elementColorActive: Color
+    elementColorActive: Color,
 ) {
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .border(3.dp, if(device.isSelected) elementColorActive else elementColor)
@@ -36,7 +38,9 @@ fun DeviceRow(
                     onDisconnect(device)
                 }
             },
-    ){
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -51,6 +55,9 @@ fun DeviceRow(
                 style = MaterialTheme.typography.bodyMedium,
                 color = color
             )
+        }
+        if(device.sayingSomething){
+            TalkingIcon(elementColorActive)
         }
     }
 }

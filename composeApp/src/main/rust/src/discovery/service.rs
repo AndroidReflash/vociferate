@@ -50,10 +50,15 @@ impl MdnsService {
                             }
                         }
 
-                         let device_id = info.get_properties()
-                              .get("device_id")
-                              .map(|p| p.val_str().to_string())
-                              .unwrap_or_else(|| "айди нет".to_string());
+                        let device_id = info.get_properties()
+                             .get("device_id")
+                             .map(|p| p.val_str().to_string())
+                             .unwrap_or_else(|| "айди нет".to_string());
+
+                        let is_active_micro = info.get_properties()
+                            .get("is_active_micro")
+                            .map(|p| p.val_str().to_lowercase() == "true") // или p.val_str() == "1"
+                            .unwrap_or(false);
 
                         let caps = crate::protocol::Capabilities::default();
                         let peer = PeerInfo {
@@ -63,6 +68,7 @@ impl MdnsService {
                             capabilities: caps,
                             session_id: rand::random(),
                             hostname,
+                            is_active_micro,
                         };
                          info!("Discovered peer: {:?}", peer);
                         peers.push(peer);
@@ -87,13 +93,12 @@ impl MdnsService {
         &mut self,
         name: String,
         addr: std::net::SocketAddr,
+        is_active_micro: bool,
     ) -> Result<(), DiscoveryError> {
         let mut properties = std::collections::HashMap::new();
         properties.insert("device_name".to_string(), name.clone());
-
+        properties.insert("is_active_micro".to_string(), is_active_micro.to_string());
         let ip_str = addr.ip().to_string();
-        // mDNS requires hostname to end with .local
-        // Generate a valid hostname from the device name
 
         let sanitized: String = name
             .chars()
@@ -104,9 +109,9 @@ impl MdnsService {
         info!("hostname {}", hostname);
         let info = ServiceInfo::new(
             crate::discovery::SERVICE_TYPE,
-            &name,           // instance name (display name)
-            &hostname,       // hostname - MUST end with .local
-            &[ip_str.as_str()][..],  // IP addresses
+            &name,
+            &hostname,
+            &[ip_str.as_str()][..],
             addr.port(),
             properties,
         ).map_err(|e| DiscoveryError::RegisterFailed(e.to_string()))?;

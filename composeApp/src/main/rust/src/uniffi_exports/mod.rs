@@ -82,6 +82,7 @@ pub struct PeerInfo {
     pub ip: String,
     pub port: u16,
     pub hostname: String,
+    pub is_active_micro: bool
 }
 
 impl PeerInfo {
@@ -102,6 +103,7 @@ impl From<&NetworkPeerInfo> for PeerInfo {
             ip: peer.addr.ip().to_string(),
             port: peer.addr.port(),
             hostname: peer.hostname.clone(),
+            is_active_micro: peer.is_active_micro.clone(),
         }
     }
 }

@@ -18,8 +18,7 @@ use crate::audio::GlobalAudioOutput;
 use crate::audio::input::GlobalAudioInput;
 use rubato::{FftFixedIn, Resampler};
 use crate::jitter::Packet;
-use arc_swap::ArcSwap;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct SessionConfig {
@@ -46,17 +45,7 @@ impl Default for SessionConfig {
     }
 }
 
-struct CaptureTask {
-    handle: JoinHandle<()>,
-    stop_tx: oneshot::Sender<()>,
-}
-
 struct SendTask {
-    handle: JoinHandle<()>,
-    stop_tx: oneshot::Sender<()>,
-}
-
-struct RecvTask {
     handle: JoinHandle<()>,
     stop_tx: oneshot::Sender<()>,
 }
@@ -66,12 +55,17 @@ struct PlaybackTask {
     stop_tx: oneshot::Sender<()>,
 }
 
+struct PeerStream {
+    packet_tx: crossbeam_channel::Sender<Packet>,
+    packet_rx: StdMutex<Option<crossbeam_channel::Receiver<Packet>>>,
+}
+
 pub struct GlobalSession {
     config: SessionConfig,
     encoder: Arc<StdMutex<OpusEncoder>>,
     decoder: Arc<StdMutex<OpusDecoder>>,
     playback_task: StdMutex<Option<PlaybackTask>>,
-    jitter_tx: Arc<ArcSwap<crossbeam_channel::Sender<Packet>>>,
+    peer_streams: Arc<DashMap<String, PeerStream>>,
     pub connections: DashMap<String, Arc<QuicConnection>>,
     send_tasks: DashMap<String, SendTask>,
     events_tx: tokio_mpsc::UnboundedSender<SessionEvent>,
@@ -96,8 +90,7 @@ impl GlobalSession {
                 OpusDecoder::new().expect("Global Decoder creation failed")
             ));
 
-            let (jitter_tx, jitter_rx) = crossbeam_channel::unbounded();
-            let jitter_tx = Arc::new(ArcSwap::new(Arc::new(jitter_tx)));
+            let peer_streams = Arc::new(DashMap::new());
             let (audio_tx, _) = broadcast::channel(32);
 
             let session = Arc::new(Self {
@@ -105,7 +98,7 @@ impl GlobalSession {
                 encoder,
                 decoder,
                 playback_task: StdMutex::new(None),
-                jitter_tx: jitter_tx,
+                peer_streams,
                 connections: DashMap::new(),
                 send_tasks: DashMap::new(),
                 events_tx,
@@ -128,12 +121,7 @@ impl GlobalSession {
 
     pub async fn pub_start_playback(&self) -> Result<(), String> {
         self.stop_playback().await;
-
-        let (jitter_tx, jitter_rx) = crossbeam_channel::unbounded();
-
-        self.jitter_tx.store(Arc::new(jitter_tx));
-        self.spawn_playback_task(jitter_rx);
-
+        self.spawn_playback_task();
         Ok(())
     }
 
@@ -148,6 +136,7 @@ impl GlobalSession {
         self.stop_playback().await;
         self.connections.clear();
         self.send_tasks.clear();
+        self.peer_streams.clear();
     }
 
     pub async fn add_peer(&self, peer: NetworkPeerInfo) -> Result<(), String> {
@@ -157,10 +146,16 @@ impl GlobalSession {
             .map(|e| e.clone())
             .ok_or_else(|| format!("No connection for peer {peer_id}"))?;
 
+        let (packet_tx, packet_rx) = crossbeam_channel::unbounded::<Packet>();
+        self.peer_streams.insert(peer_id.clone(), PeerStream {
+            packet_tx,
+            packet_rx: StdMutex::new(Some(packet_rx))
+        });
+
         let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
         let connection_for_recv = connection.clone();
-
-        let jitter_tx_swap = self.jitter_tx.clone();
+        let peer_id_for_task = peer_id.clone();
+        let peer_streams = self.peer_streams.clone();
 
         let handle = tokio::spawn(async move {
             loop {
@@ -175,16 +170,18 @@ impl GlobalSession {
                         match Frame::decode(&data) {
                             Ok(frame) => {
                                 if frame.frame_type == FrameType::AudioData {
-                                    let tx = jitter_tx_swap.load();
-                                    let _ = tx.send(Packet {
-                                        seq: frame.sequence,
-                                        data: frame.payload.to_vec(),
-                                        timestamp_ms: frame.timestamp_ms,
-                                    });
+                                    // Шлем в канал конкретного пира
+                                    if let Some(stream) = peer_streams.get(&peer_id_for_task) {
+                                        let _ = stream.packet_tx.send(Packet {
+                                            seq: frame.sequence,
+                                            data: frame.payload.to_vec(),
+                                            timestamp_ms: frame.timestamp_ms,
+                                        });
+                                    }
                                 }
                             }
                             Err(e) => {
-                                log::error!("Ошибка декодирования датаграммы: {}", e);
+                                log::error!("Ошибка декодирования датаграммы от {}: {}", peer_id_for_task, e);
                             }
                         }
                     }
@@ -202,15 +199,16 @@ impl GlobalSession {
             let _ = task.stop_tx.send(());
             let _ = task.handle.await;
         }
-
+        self.peer_streams.remove(peer_id);
         self.connections.remove(peer_id);
         let _ = self.events_tx.send(SessionEvent::PeerDisconnected(peer_id.to_string()));
     }
 
-    fn spawn_playback_task(&self, jitter_rx: crossbeam_channel::Receiver<Packet>) {
+    fn spawn_playback_task(&self) {
         let events_tx = self.events_tx.clone();
         let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
         let jitter_target_ms = self.config.jitter_target_ms;
+        let peer_streams = self.peer_streams.clone();
 
         let output_device_sample_rate = GlobalAudioOutput::global().current_sample_rate();
         let channels_count = GlobalAudioOutput::global().current_channels() as usize;
@@ -218,34 +216,13 @@ impl GlobalSession {
         let jitter_max_ms = 200;
 
         let handle = tokio::spawn(async move {
-            let jitter_config = JitterBufferConfig::new(jitter_max_ms, jitter_target_ms);
-            let mut jitter_buffer = JitterBuffer::new(jitter_config);
-            let jitter_decoder = OpusDecoder::new().expect("Jitter Decoder creation failed");
-            jitter_buffer.set_decoder(jitter_decoder);
-
-            let mut audio_queue = VecDeque::with_capacity(FRAME_SAMPLES * 4);
-            let max_allowed_samples = FRAME_SAMPLES * 4;
-
+            let mut peer_buffers: HashMap<String, (JitterBuffer, crossbeam_channel::Receiver<Packet>)> = HashMap::new();
             let mut resampler: Option<FftFixedIn<f32>> = None;
+
             let mut interval = tokio::time::interval(Duration::from_millis(FRAME_SIZE_MS.into()));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
             loop {
-                while let Ok(packet) = jitter_rx.try_recv() {
-                    let _ = jitter_buffer.push(packet.seq, packet.data, packet.timestamp_ms);
-                }
-
-                match jitter_buffer.pop() {
-                    Ok(pcm_chunk) => {
-                        if !pcm_chunk.is_empty() {
-                            audio_queue.extend(pcm_chunk);
-                        }
-                    }
-                    Err(_) => {
-                        // Если буфер пуст, ничего страшного, пойдем на тик таймера
-                    }
-                }
-
                 tokio::select! {
                     _ = &mut stop_rx => {
                         break;
@@ -253,29 +230,54 @@ impl GlobalSession {
                     _ = interval.tick() => {
                         let frames = FRAME_SAMPLES;
 
-                        if audio_queue.len() > max_allowed_samples {
-                            let excess = audio_queue.len() - max_allowed_samples;
-                            audio_queue.drain(..excess);
+                        peer_buffers.retain(|id, _| peer_streams.contains_key(id));
+
+                        for entry in peer_streams.iter() {
+                            let peer_id = entry.key().clone();
+                            if !peer_buffers.contains_key(&peer_id) {
+                                if let Some(mut rx_lock) = entry.value().packet_rx.lock().unwrap().take() {
+                                    let jitter_config = JitterBufferConfig::new(jitter_max_ms, jitter_target_ms);
+                                    let mut jb = JitterBuffer::new(jitter_config);
+                                    jb.set_decoder(OpusDecoder::new().expect("Peer Decoder creation failed"));
+
+                                    peer_buffers.insert(peer_id, (jb, rx_lock));
+                                }
+                            }
                         }
 
-                        let pcm_filtered = if audio_queue.len() >= frames {
-                            let mut chunk: Vec<f32> = audio_queue.drain(..frames).collect();
-
-                            for s in &mut chunk {
-                                *s = s.tanh();
+                        for (_, (buffer, rx)) in peer_buffers.iter_mut() {
+                            while let Ok(packet) = rx.try_recv() {
+                                let _ = buffer.push(packet.seq, packet.data, packet.timestamp_ms);
                             }
-                            chunk
-                        } else {
-                            resampler = None;
-                            vec![0.0f32; frames]
-                        };
+                        }
 
-                        let current_energy: f32 = pcm_filtered.iter().map(|x| x * x).sum::<f32>().sqrt() / (frames as f32).sqrt();
+                        let mut mixed_pcm = vec![0.0f32; frames];
+                        let mut active_speakers = 0;
+
+                        for (_, (buffer, _)) in peer_buffers.iter_mut() {
+                            if let Ok(pcm_chunk) = buffer.pop() {
+                                if !pcm_chunk.is_empty() && pcm_chunk.len() == frames {
+                                    active_speakers += 1;
+                                    for i in 0..frames {
+                                        mixed_pcm[i] += pcm_chunk[i];
+                                    }
+                                }
+                            }
+                        }
+
+                        if active_speakers > 0 {
+                            let norm_factor = 1.0 / (active_speakers as f32).sqrt();
+                            for s in &mut mixed_pcm {
+                                *s = (*s * norm_factor).clamp(-0.99, 0.99);
+                            }
+                        }
+
+                        let current_energy: f32 = mixed_pcm.iter().map(|x| x * x).sum::<f32>().sqrt() / (frames as f32).sqrt();
                         let _ = events_tx.send(SessionEvent::LevelOutput(current_energy));
 
                         let mut input_channels = vec![vec![0.005f32; frames]; input_channels_count];
                         for i in 0..frames {
-                            input_channels[0][i] = pcm_filtered[i];
+                            input_channels[0][i] = mixed_pcm[i];
                         }
 
                         let resampler_to_use = if output_device_sample_rate != SAMPLE_RATE {
@@ -296,33 +298,32 @@ impl GlobalSession {
                             match resamp.process(&input_channels, None) {
                                 Ok(output_channels) => output_channels[0].clone(),
                                 Err(e) => {
-                                    log::error!("Ошибка ресемплирования вывода: {:?}", e);
+                                    log::error!("Ошибка ресемплирования вывода микшера: {:?}", e);
                                     resampler = None;
-                                    pcm_filtered.clone()
+                                    mixed_pcm.clone()
                                 }
                             }
                         } else {
-                            pcm_filtered
+                            mixed_pcm
                         };
 
                         let out_frames = resampled_mono.len();
                         let mut final_pcm = vec![0.0f32; out_frames * channels_count];
 
-                        let mut counter = 0;
+                        let mut has_audio = false;
                         for i in 0..out_frames {
                             let sample = resampled_mono[i].clamp(-0.99, 0.99);
                             if sample != 0.0 {
-                                counter += 1;
+                                has_audio = true;
                             }
                             for ch in 0..channels_count {
                                 final_pcm[i * channels_count + ch] = sample;
                             }
                         }
 
-                        if counter > 0 {
+                        if has_audio {
                             GlobalAudioOutput::global().write(&final_pcm);
                         }
-
                     }
                 }
             }
@@ -367,5 +368,3 @@ pub enum SessionEvent {
     Stats(SessionStats),
     Error(String),
 }
-
-

@@ -29,6 +29,7 @@ pub struct PeerInfo {
     pub capabilities: Capabilities,
     pub session_id: u64,
     pub hostname: String,
+    pub is_active_micro: bool,
 }
 
 type EventSender = mpsc::UnboundedSender<ConnectionEvent>;
@@ -100,16 +101,26 @@ impl ConnectionManager {
                 tokio::spawn(async move {
                     match incoming.await {
                         Ok(conn) => {
-                            info!("маладэц");
+                            info!("мы друг друга видим");
                             let peer_addr = conn.remote_address();
 
                             let mut quic = QuicConnection::new(conn, config);
+                            let (current_name, current_mic_status) = {
+                                // Безопасно читаем из мьютекса payload
+                                if let Some(payload) = crate::discovery::GlobalDiscoverySender::global().payload.lock().unwrap().as_ref() {
+                                    (payload.device_name.clone(), payload.is_active_micro)
+                                } else {
+                                    ("VoiceTransfer".to_string(), false)
+                                }
+                            };
+
                             let local_payload = HandshakePayload {
                                 protocol_version: 1,
-                                device_name: "VoiceTransfer".into(),
+                                device_name: current_name,
                                 capabilities: Capabilities::default(),
                                 session_id: rand::random(),
                                 device_id: get_cached_device_id().to_string(),
+                                is_active_micro: current_mic_status,
                             };
 
                             match quic.perform_handshake_server(local_payload).await {
@@ -122,6 +133,7 @@ impl ConnectionManager {
                                         capabilities: peer_payload.capabilities.clone(),
                                         session_id: peer_payload.session_id,
                                         hostname: peer_payload.device_name.clone(),
+                                        is_active_micro: peer_payload.is_active_micro.clone(),
                                     };
 
                                     let connection = Arc::new(quic);
@@ -140,6 +152,7 @@ impl ConnectionManager {
                                         capabilities: peer_payload.capabilities.clone(),
                                         session_id: peer_payload.session_id,
                                         hostname: peer_payload.device_name.clone(),
+                                        is_active_micro: peer_payload.is_active_micro.clone(),
                                     };
 
                                     if let Err(e) = GlobalSession::global().start(vec![network_peer_info]).await {
@@ -152,6 +165,7 @@ impl ConnectionManager {
                                         ip: peer_addr.ip().to_string(),
                                         port: peer_addr.port(),
                                         hostname: peer_payload.device_name.clone(),
+                                        is_active_micro: peer_payload.is_active_micro.clone(),
                                     };
 
                                     let uniffi_peer_clone = uniffi_peer.clone();
@@ -227,12 +241,21 @@ impl ConnectionManager {
             .map_err(|e| NetworkError::ConnectionFailed(format!("Connection failed: {e}")))?;
 
         let mut quic = QuicConnection::new(conn, self.config.clone());
+        let (current_name, current_mic_status) = {
+            if let Some(payload) = crate::discovery::GlobalDiscoverySender::global().payload.lock().unwrap().as_ref() {
+                (payload.device_name.clone(), payload.is_active_micro)
+            } else {
+                ("VoiceTransfer".to_string(), false)
+            }
+        };
+
         let local_payload = HandshakePayload {
             protocol_version: 1,
-            device_name: "VoiceTransfer".into(),
+            device_name: current_name,
             capabilities: Capabilities::default(),
             session_id: rand::random(),
             device_id: get_cached_device_id().to_string(),
+            is_active_micro: current_mic_status,
         };
         let peer_payload = quic.perform_handshake(local_payload).await?;
         let peer_id = peer_payload.device_id.clone();
@@ -243,6 +266,7 @@ impl ConnectionManager {
             capabilities: peer_payload.capabilities,
             session_id: peer_payload.session_id,
             hostname: peer_payload.device_name.clone(),
+            is_active_micro: peer_payload.is_active_micro.clone(),
         };
 
         let connection = Arc::new(quic);
@@ -254,6 +278,7 @@ impl ConnectionManager {
             ip: addr.ip().to_string(),
             port: addr.port(),
             hostname: peer_payload.device_name.clone(),
+            is_active_micro: peer_payload.is_active_micro.clone(),
         };
 
         // Шлем событие коннекта в канал через Sender

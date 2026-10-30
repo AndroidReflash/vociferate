@@ -83,7 +83,7 @@ impl QuicConnection {
         &mut self,
         local_payload: HandshakePayload,
     ) -> Result<HandshakePayload> {
-        log::info!("хэндшейк случился");
+        log::info!("рукопожатие сделали - здарова, братан!");
         let (mut send, mut recv) = self.accept_bi_stream().await?;
         let received = recv
             .read_to_end(usize::MAX)

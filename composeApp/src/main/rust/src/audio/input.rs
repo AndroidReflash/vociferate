@@ -237,6 +237,14 @@ impl GlobalAudioInput {
     }
 
     pub fn set_device(&self, device_id: Option<String>, config: AudioConfig) -> Result<(), String> {
+        {
+            let mut in_lock = self.active_input.lock().unwrap();
+            *in_lock = None;
+        }
+        {
+            let mut ctrl_lock = self.current_control.lock().unwrap();
+            *ctrl_lock = None;
+        }
         let input = AudioInput::new(device_id, config.clone())
             .map_err(|e| format!("Failed to create AudioInput: {e:?}"))?;
 
@@ -264,10 +272,17 @@ impl GlobalAudioInput {
     }
 
     pub fn stop(&self) -> Result<(), String> {
-        let ctrl_lock = self.current_control.lock().unwrap();
+        let mut ctrl_lock = self.current_control.lock().unwrap();
         if let Some(control) = ctrl_lock.as_ref() {
             control.shared.running.store(false, std::sync::atomic::Ordering::Relaxed);
         }
+
+        *ctrl_lock = None;
+        drop(ctrl_lock);
+
+        let mut in_lock = self.active_input.lock().unwrap();
+        *in_lock = None;
+
         Ok(())
     }
 }

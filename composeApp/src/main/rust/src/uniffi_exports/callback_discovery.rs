@@ -1,10 +1,12 @@
 use tokio::sync::{mpsc, Mutex};
 use std::sync::LazyLock;
+use crate::uniffi_exports::PeerInfo;
 
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum DiscoveryEvent {
     PeersAdded(Vec<crate::uniffi_exports::PeerInfo>),
     PeersRemoved(Vec<String>),
+    PeersUpdated(Vec<PeerInfo>),
 }
 
 type DiscoveryChannel = (

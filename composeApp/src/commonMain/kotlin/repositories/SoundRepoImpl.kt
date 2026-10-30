@@ -25,13 +25,14 @@ class SoundRepoImpl(
     private val deviceMonitor: DeviceMonitor,
     private val scope: CoroutineScope
 ) : SoundRepo {
-    override fun setDefaultInOut(){
+    override suspend fun setDefaultInOut() = withContext(Dispatchers.IO){
         val speakers = getBoolSetting(DatabaseValues.OutputDeviceListen.value) ?: false
         val listening = getBoolSetting(DatabaseValues.InputDeviceListen.value) ?: false
         if (listening){
             val inputDevice = settings.inputDevice.value
             try {
                 startListeningMicro(inputDevice,  settings.defaultMircoConfig)
+                _state.value = _state.value.copy(listening = true)
             }catch (e: Exception){
                 println("$inputDevice плохое устройство")
             }
@@ -40,12 +41,11 @@ class SoundRepoImpl(
             val outputDevice = settings.outputDevice.value
             try {
                 startSpeakers(outputDevice, settings.defaultSpeakersConfig)
+                _state.value = _state.value.copy(speakers = true)
             }catch (e: Exception){
                 println("$outputDevice плохое устройство")
             }
-
         }
-        _state.value = _state.value.copy(listening = listening, speakers = speakers)
     }
 
     private val _state = MutableStateFlow(

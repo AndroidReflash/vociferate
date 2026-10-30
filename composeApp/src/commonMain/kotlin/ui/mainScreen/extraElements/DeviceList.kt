@@ -40,7 +40,7 @@ fun DeviceList(
                 onConnect = { onConnect(it) },
                 onDisconnect = { onDisconnect(it) },
                 elementColor = elementColor,
-                elementColorActive = elementColorActive
+                elementColorActive = elementColorActive,
             )
         }
     }

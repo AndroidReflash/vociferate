@@ -6,4 +6,5 @@ data class DiscoveredDevice(
     val address: String,
     val port: Int,
     val isSelected: Boolean = false,
+    val sayingSomething: Boolean = false
 )

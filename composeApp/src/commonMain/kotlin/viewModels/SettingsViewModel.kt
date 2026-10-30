@@ -22,5 +22,13 @@ class SettingsViewModel(
         repo.setOutputDevice(device)
     }
 
+    fun setOutputDefault(){
+        repo.setOutputDefault()
+    }
+
+    fun setInputDefault(){
+        repo.setInputDefault()
+    }
+
     val elementColor = repo.elementColor
 }
