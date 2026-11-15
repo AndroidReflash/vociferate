@@ -27,24 +27,7 @@ impl Default for NetworkConfig {
     }
 }
 
-impl NetworkConfig {
-    pub fn new(alpn: String) -> Self {
-        Self {
-            alpn,
-            ..Default::default()
-        }
-    }
 
-    pub fn with_idle_timeout(mut self, ms: u64) -> Self {
-        self.idle_timeout_ms = ms;
-        self
-    }
-
-    pub fn with_keep_alive(mut self, ms: u64) -> Self {
-        self.keep_alive_interval_ms = ms;
-        self
-    }
-}
 
 pub fn get_cached_device_id() -> &'static str {
     DEVICE_ID.get_or_init(|| Uuid::new_v4().to_string())

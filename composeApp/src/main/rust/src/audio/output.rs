@@ -1,13 +1,12 @@
 use super::config::types::{AudioConfig, AudioError};
 use super::config::stream_config::{build_stream_config, find_compatible_config};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Stream};
+use cpal::Stream;
 use parking_lot::Mutex as ParkingMutex;
-use rtrb::{Consumer, Producer, RingBuffer};
+use rtrb::{Producer, RingBuffer};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use uniffi;
-use log::info;
 
 const RING_CAPACITY: usize = 8192;
 

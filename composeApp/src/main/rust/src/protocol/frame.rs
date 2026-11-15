@@ -1,4 +1,3 @@
-use crate::protocol::handshake::HandshakePayload;
 use crate::protocol::error::{ProtocolError, Result};
 use bytes::{BytesMut};
 use serde::{Deserialize, Serialize};
@@ -64,17 +63,7 @@ impl Frame {
         Self::new(FrameType::AudioData, seq, opus_data)
     }
 
-    pub fn ping(seq: u64) -> Self {
-        Self::new(FrameType::Ping, seq, bytes::Bytes::new())
-    }
 
-    pub fn pong(seq: u64) -> Self {
-        Self::new(FrameType::Pong, seq, bytes::Bytes::new())
-    }
-
-    pub fn goodbye(seq: u64) -> Self {
-        Self::new(FrameType::Goodbye, seq, bytes::Bytes::new())
-    }
 
     pub fn encode(&self) -> Result<bytes::Bytes> {
         let mut buf = BytesMut::with_capacity(1 + 8 + 8 + self.payload.len() + 4);

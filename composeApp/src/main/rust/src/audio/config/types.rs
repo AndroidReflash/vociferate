@@ -1,4 +1,3 @@
-use cpal::{SampleRate, StreamConfig};
 use uniffi;
 
 #[derive(Debug, Clone, uniffi::Record)]

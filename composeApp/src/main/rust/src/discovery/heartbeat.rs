@@ -1,15 +1,15 @@
 use crate::protocol::Capabilities;
 use crate::network::PeerInfo as NetworkPeerInfo;
-use crate::uniffi_exports::{PeerInfo as UniffiPeerInfo};
+use crate::uniffi_exports::{DiscoveryEvent, DISCOVERY_CHANNEL, PeerInfo as UniffiPeerInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::net::UdpSocket;
-use log::{debug, info, warn, error};
+use log::{info, warn};
 use std::sync::OnceLock;
 
 const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
@@ -202,8 +202,6 @@ impl GlobalDiscoveryReceiver {
                                         id: peer_id.clone(),
                                         name: heartbeat.device_name.clone(),
                                         addr: SocketAddr::new(heartbeat.ip.parse().unwrap(), heartbeat.port),
-                                        capabilities: heartbeat.capabilities,
-                                        session_id: heartbeat.session_id,
                                         hostname: heartbeat.device_name.clone(),
                                         is_active_micro: heartbeat.is_active_micro,
                                     };
@@ -239,17 +237,13 @@ impl GlobalDiscoveryReceiver {
                                         let uniffi_peer = UniffiPeerInfo::from(&peer_info);
                                         info!("Новый пир обнаружен: {:?}", uniffi_peer);
 
-                                        let _ = crate::uniffi_exports::callback_discovery::DISCOVERY_CHANNEL.0.send(
-                                            crate::uniffi_exports::callback_discovery::DiscoveryEvent::PeersAdded(vec![uniffi_peer])
-                                        );
+                                        let _ = DISCOVERY_CHANNEL.0.send(DiscoveryEvent::PeersAdded(vec![uniffi_peer]));
                                     } else if has_changed {
                                         let uniffi_peer = UniffiPeerInfo::from(&peer_info);
                                         info!("Пир обновил данные (микрофон/имя): {:?}", uniffi_peer);
 
                                         // Нам понадобится добавить PeersUpdated в DiscoveryEvent в Rust/UniFFI
-                                        let _ = crate::uniffi_exports::callback_discovery::DISCOVERY_CHANNEL.0.send(
-                                            crate::uniffi_exports::callback_discovery::DiscoveryEvent::PeersUpdated(vec![uniffi_peer])
-                                        );
+                                        let _ = DISCOVERY_CHANNEL.0.send(DiscoveryEvent::PeersUpdated(vec![uniffi_peer]));
                                     }
                                 }
                             }
@@ -290,9 +284,7 @@ impl GlobalDiscoveryReceiver {
                 if !removed_ids.is_empty() {
                     info!("пиры на удаление: {:?}", removed_ids);
 
-                    let _ = crate::uniffi_exports::callback_discovery::DISCOVERY_CHANNEL.0.send(
-                        crate::uniffi_exports::callback_discovery::DiscoveryEvent::PeersRemoved(removed_ids)
-                    );
+                    let _ = DISCOVERY_CHANNEL.0.send(DiscoveryEvent::PeersRemoved(removed_ids));
                 }
             }
         });
@@ -311,10 +303,5 @@ impl GlobalDiscoveryReceiver {
         if let Some(h) = self.cleanup_handle.lock().unwrap().take() {
             h.abort();
         }
-    }
-
-    pub fn get_peers(&self) -> Vec<NetworkPeerInfo> {
-        let peers_lock = self.peers.lock().unwrap();
-        peers_lock.values().map(|p| p.info.clone()).collect()
     }
 }

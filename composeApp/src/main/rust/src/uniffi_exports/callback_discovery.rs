@@ -1,10 +1,12 @@
-use tokio::sync::{mpsc, Mutex};
 use std::sync::LazyLock;
-use crate::uniffi_exports::PeerInfo;
+
+use tokio::sync::{mpsc, Mutex};
+
+use crate::uniffi_exports::types::PeerInfo;
 
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum DiscoveryEvent {
-    PeersAdded(Vec<crate::uniffi_exports::PeerInfo>),
+    PeersAdded(Vec<PeerInfo>),
     PeersRemoved(Vec<String>),
     PeersUpdated(Vec<PeerInfo>),
 }
@@ -21,7 +23,7 @@ pub static DISCOVERY_CHANNEL: LazyLock<DiscoveryChannel> = LazyLock::new(|| {
 
 #[uniffi::export]
 pub fn next_discovery_event() -> Option<DiscoveryEvent> {
-    crate::uniffi_exports::RUNTIME.block_on(async {
+    crate::uniffi_exports::runtime::RUNTIME.block_on(async {
         DISCOVERY_CHANNEL.1.lock().await.recv().await
     })
 }

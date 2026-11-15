@@ -1,24 +1,19 @@
-use crate::audio::{AudioConfig, AudioInput, AudioOutput};
-use crate::codec::config::{CHANNELS, FRAME_SAMPLES, FRAME_SIZE_MS, SAMPLE_RATE, OPUS_BUF};
+use crate::codec::config::{CHANNELS, FRAME_SAMPLES, FRAME_SIZE_MS, SAMPLE_RATE};
 use crate::codec::decoder::OpusDecoder;
-use crate::codec::encoder::OpusEncoder;
 use crate::jitter::{JitterBuffer, JitterBufferConfig};
 use crate::network::{PeerInfo as NetworkPeerInfo, QuicConnection};
 use crate::protocol::Frame;
-use crate::uniffi_exports::{PeerInfo, VoiceError};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::sync::OnceLock;
 use std::time::Duration;
-use tokio::sync::{mpsc as tokio_mpsc, oneshot, broadcast};
-use log::{debug, info};
+use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use tokio::task::JoinHandle;
 use dashmap::DashMap;
 use crate::protocol::FrameType;
 use crate::audio::GlobalAudioOutput;
-use crate::audio::input::GlobalAudioInput;
 use rubato::{FftFixedIn, Resampler};
 use crate::jitter::Packet;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct SessionConfig {
@@ -57,22 +52,16 @@ struct PlaybackTask {
 
 struct PeerStream {
     packet_tx: crossbeam_channel::Sender<Packet>,
-    packet_rx: StdMutex<Option<crossbeam_channel::Receiver<Packet>>>,
+    packet_rx: crossbeam_channel::Receiver<Packet>,
 }
 
 pub struct GlobalSession {
     config: SessionConfig,
-    encoder: Arc<StdMutex<OpusEncoder>>,
-    decoder: Arc<StdMutex<OpusDecoder>>,
     playback_task: StdMutex<Option<PlaybackTask>>,
     peer_streams: Arc<DashMap<String, PeerStream>>,
     pub connections: DashMap<String, Arc<QuicConnection>>,
     send_tasks: DashMap<String, SendTask>,
     events_tx: tokio_mpsc::UnboundedSender<SessionEvent>,
-    ptt_enabled: Arc<StdMutex<bool>>,
-    output_device: Arc<StdMutex<Option<String>>>,
-    _events_rx: StdMutex<Option<tokio_mpsc::UnboundedReceiver<SessionEvent>>>,
-    audio_tx: broadcast::Sender<bytes::Bytes>,
 }
 
 impl GlobalSession {
@@ -83,29 +72,15 @@ impl GlobalSession {
             let config = SessionConfig::default();
             let (events_tx, _events_rx) = tokio_mpsc::unbounded_channel();
 
-            let encoder = Arc::new(StdMutex::new(
-                OpusEncoder::new(config.bitrate_bps).expect("Global Encoder creation failed")
-            ));
-            let decoder = Arc::new(StdMutex::new(
-                OpusDecoder::new().expect("Global Decoder creation failed")
-            ));
-
             let peer_streams = Arc::new(DashMap::new());
-            let (audio_tx, _) = broadcast::channel(32);
 
             let session = Arc::new(Self {
                 config,
-                encoder,
-                decoder,
                 playback_task: StdMutex::new(None),
                 peer_streams,
                 connections: DashMap::new(),
                 send_tasks: DashMap::new(),
                 events_tx,
-                ptt_enabled: Arc::new(StdMutex::new(false)),
-                output_device: Arc::new(StdMutex::new(None)),
-                _events_rx: StdMutex::new(Some(_events_rx)),
-                audio_tx,
             });
 
             session
@@ -116,7 +91,15 @@ impl GlobalSession {
         for peer in peers {
             self.add_peer(peer).await?;
         }
+        self.ensure_playback();
         Ok(())
+    }
+
+    fn ensure_playback(&self) {
+        let has_playback = self.playback_task.lock().unwrap().is_some();
+        if !has_playback {
+            self.spawn_playback_task();
+        }
     }
 
     pub async fn pub_start_playback(&self) -> Result<(), String> {
@@ -132,15 +115,14 @@ impl GlobalSession {
         }
     }
 
-    pub async fn stop(&self) {
-        self.stop_playback().await;
-        self.connections.clear();
-        self.send_tasks.clear();
-        self.peer_streams.clear();
-    }
+
 
     pub async fn add_peer(&self, peer: NetworkPeerInfo) -> Result<(), String> {
         let peer_id = peer.id.clone();
+
+        if self.send_tasks.contains_key(&peer_id) {
+            return Ok(());
+        }
 
         let connection = self.connections.get(&peer_id)
             .map(|e| e.clone())
@@ -149,7 +131,7 @@ impl GlobalSession {
         let (packet_tx, packet_rx) = crossbeam_channel::unbounded::<Packet>();
         self.peer_streams.insert(peer_id.clone(), PeerStream {
             packet_tx,
-            packet_rx: StdMutex::new(Some(packet_rx))
+            packet_rx,
         });
 
         let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
@@ -190,7 +172,7 @@ impl GlobalSession {
         });
 
         self.send_tasks.insert(peer_id.clone(), SendTask { handle, stop_tx });
-        let _ = self.events_tx.send(SessionEvent::PeerConnected(peer));
+        let _ = self.events_tx.send(SessionEvent::PeerConnected);
         Ok(())
     }
 
@@ -201,7 +183,7 @@ impl GlobalSession {
         }
         self.peer_streams.remove(peer_id);
         self.connections.remove(peer_id);
-        let _ = self.events_tx.send(SessionEvent::PeerDisconnected(peer_id.to_string()));
+        let _ = self.events_tx.send(SessionEvent::PeerDisconnected);
     }
 
     fn spawn_playback_task(&self) {
@@ -235,13 +217,12 @@ impl GlobalSession {
                         for entry in peer_streams.iter() {
                             let peer_id = entry.key().clone();
                             if !peer_buffers.contains_key(&peer_id) {
-                                if let Some(mut rx_lock) = entry.value().packet_rx.lock().unwrap().take() {
-                                    let jitter_config = JitterBufferConfig::new(jitter_max_ms, jitter_target_ms);
-                                    let mut jb = JitterBuffer::new(jitter_config);
-                                    jb.set_decoder(OpusDecoder::new().expect("Peer Decoder creation failed"));
+                                let rx = entry.value().packet_rx.clone();
+                                let jitter_config = JitterBufferConfig::new(jitter_max_ms, jitter_target_ms);
+                                let mut jb = JitterBuffer::new(jitter_config);
+                                jb.set_decoder(OpusDecoder::new().expect("Peer Decoder creation failed"));
 
-                                    peer_buffers.insert(peer_id, (jb, rx_lock));
-                                }
+                                peer_buffers.insert(peer_id, (jb, rx));
                             }
                         }
 
@@ -272,8 +253,8 @@ impl GlobalSession {
                             }
                         }
 
-                        let current_energy: f32 = mixed_pcm.iter().map(|x| x * x).sum::<f32>().sqrt() / (frames as f32).sqrt();
-                        let _ = events_tx.send(SessionEvent::LevelOutput(current_energy));
+                        let _current_energy: f32 = mixed_pcm.iter().map(|x| x * x).sum::<f32>().sqrt() / (frames as f32).sqrt();
+                        let _ = events_tx.send(SessionEvent::LevelOutput);
 
                         let mut input_channels = vec![vec![0.005f32; frames]; input_channels_count];
                         for i in 0..frames {
@@ -332,39 +313,18 @@ impl GlobalSession {
         *self.playback_task.lock().unwrap() = Some(PlaybackTask { handle, stop_tx });
     }
 
-    pub fn set_ptt(&self, enabled: bool) {
-        *self.ptt_enabled.lock().unwrap() = enabled;
-    }
 
-    pub fn set_output_device(&self, device: Option<String>) {
-        *self.output_device.lock().unwrap() = device;
-    }
 
     pub fn set_connection(&self, peer_id: String, connection: Arc<QuicConnection>) {
         self.connections.insert(peer_id, connection);
     }
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct SessionStats {
-    pub jitter_ms: f32,
-    pub underruns: u64,
-    pub overruns: u64,
-    pub packets_received: u64,
-    pub packets_lost: u64,
-}
 
-#[derive(Clone, Debug, uniffi::Record)]
-pub struct SessionHandle {
-    pub inner: u64,
-}
 
 #[derive(Clone, Debug)]
 pub enum SessionEvent {
-    PeerConnected(NetworkPeerInfo),
-    PeerDisconnected(String),
-    LevelInput(f32),
-    LevelOutput(f32),
-    Stats(SessionStats),
-    Error(String),
+    PeerConnected,
+    PeerDisconnected,
+    LevelOutput,
 }

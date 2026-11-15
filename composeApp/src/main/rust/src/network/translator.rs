@@ -1,18 +1,17 @@
 use bytes::Bytes;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tokio::sync::Mutex as TokioMutex;
 use parking_lot::Mutex as ParkingMutex;
-use crate::network::ConnectionManager;
+use crate::network::QuicConnection;
 use crate::audio::input::InputShared;
 use log::{info, error};
-use crate::codec::config::{FRAME_SAMPLES, SAMPLE_RATE, FRAME_SIZE_MS, OPUS_BUF};
-use rubato::{FftFixedOut, Resampler};
+use crate::codec::config::{SAMPLE_RATE, FRAME_SIZE_MS, OPUS_BUF};
+use rubato::Resampler;
 
 pub async fn run_audio_broadcaster(
     consumer: Arc<ParkingMutex<Option<rtrb::Consumer<f32>>>>,
     shared: Arc<InputShared>,
-    connection_manager: Arc<TokioMutex<ConnectionManager>>,
+    connections: Arc<dashmap::DashMap<String, Arc<QuicConnection>>>,
     sample_rate: u32,
     channels: u16,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -62,11 +61,8 @@ pub async fn run_audio_broadcaster(
         interval.tick().await;
 
         // Проверяем, есть ли вообще кому отправлять
-        {
-            let cm = connection_manager.lock().await;
-            if cm.connections.is_empty() {
-                continue;
-            }
+        if connections.is_empty() {
+            continue;
         }
 
         // Читаем из кольцевого буфера нужное количество семплов
@@ -164,8 +160,7 @@ pub async fn run_audio_broadcaster(
         let opus_bytes = Bytes::copy_from_slice(&opus_output_buf[..encoded_len]);
 
         // Рассылаем клиентам
-        let cm = connection_manager.lock().await;
-        for entry in cm.connections.iter() {
+        for entry in connections.iter() {
             let (peer_id, connection) = entry.pair();
             if let Err(e) = connection.send_audio(opus_bytes.clone()).await {
                 error!("Failed to send audio to peer {}: {}", peer_id, e);

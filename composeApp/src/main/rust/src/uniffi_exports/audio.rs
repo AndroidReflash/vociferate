@@ -1,22 +1,13 @@
-//! Audio UniFFI exports
-
-use crate::audio::{list_input_devices, list_output_devices, AudioConfig, AudioInput, AudioError, InputControl, AudioDevice};
-use crate::uniffi_exports::VoiceError;
-use std::sync::{Arc, LazyLock, Mutex};
-use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 use std::collections::HashMap;
-use tokio::runtime::Runtime;
-use log::{info, error};
-use crate::audio::GlobalAudioOutput;
-use crate::audio::input::GlobalAudioInput;
-use crate::session::GlobalSession;
-use crate::discovery::GlobalDiscoverySender;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    Runtime::new().expect("Failed to create Tokio runtime")
-});
+use crate::audio::input::GlobalAudioInput;
+use crate::audio::{list_input_devices, list_output_devices, AudioConfig, AudioDevice, GlobalAudioOutput, InputControl};
+use crate::discovery::GlobalDiscoverySender;
+use crate::session::GlobalSession;
+use crate::uniffi_exports::error::VoiceError;
+use crate::uniffi_exports::runtime::RUNTIME;
 
 struct ListeningTask {
     control: InputControl,

@@ -1,17 +1,14 @@
 use super::config::types::{AudioConfig, AudioError};
 use super::config::stream_config::{build_stream_config, find_compatible_config};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Stream};
+use cpal::Stream;
 use parking_lot::Mutex as ParkingMutex;
-use rtrb::{Consumer, Producer, RingBuffer};
+use rtrb::{Consumer, RingBuffer};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use uniffi;
 use crate::network::ConnectionManager;
-use crate::uniffi_exports::{SHARED_CONNECTIONS};
-use crate::uniffi_exports::VoiceError;
 use crate::network::translator::run_audio_broadcaster;
-use log::{info, error};
 use std::sync::{OnceLock, Mutex};
 
 const RING_CAPACITY: usize = 8192;
@@ -158,18 +155,10 @@ impl AudioInput {
         let consumer_clone = control.consumer.clone();
         let shared_clone = Arc::clone(&shared);
 
-        let connection_manager_arc = {
-            let shared_conn = SHARED_CONNECTIONS.lock().unwrap();
-            match shared_conn.as_ref() {
-                Some(cm) => cm.clone(),
-                None => {
-                    return Err(AudioError::DeviceUnavailable {
-                        reason: "Discovery not started. Call start_discovery() first.".to_string()
-                    });
-                }
-            }
-        };
-        let connection_manager_clone = Arc::clone(&connection_manager_arc);
+        let connections = ConnectionManager::global()
+            .map_err(|e| AudioError::DeviceUnavailable { reason: e.to_string() })?
+            .connections
+            .clone();
 
         let sample_rate = stream_config.sample_rate.0;
         let channels = stream_config.channels;
@@ -180,7 +169,7 @@ impl AudioInput {
             if let Err(e) = run_audio_broadcaster(
                 consumer_clone,
                 shared_clone,
-                connection_manager_arc,
+                connections,
                 sample_rate,
                 channels,
             ).await {

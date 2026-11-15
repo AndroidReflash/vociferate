@@ -15,7 +15,7 @@ static CONTEXT: OnceLock<GlobalRef> = OnceLock::new();
 // только вместе с этой строкой.
 #[no_mangle]
 pub extern "system" fn Java_nativeContext_NativeContext_initialize(
-    mut env: JNIEnv,
+     env: JNIEnv,
     _this: JObject,
     context: JObject,
 ) -> jboolean {

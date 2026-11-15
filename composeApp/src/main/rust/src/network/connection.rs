@@ -3,31 +3,19 @@ use crate::network::error::{NetworkError, Result};
 use crate::protocol::{Frame, FrameType, HandshakePayload};
 use bytes::Bytes;
 use quinn::{Connection, RecvStream, SendStream};
-use std::net::SocketAddr;
-use std::time::Duration;
-use tokio::time::timeout;
-use log::{error, debug, info};
 
 pub struct QuicConnection {
     pub connection: Connection,
-    recv_stream: tokio::sync::Mutex<Option<quinn::RecvStream>>,
-    send_stream: tokio::sync::Mutex<Option<quinn::SendStream>>,
-    config: NetworkConfig,
     sequence: std::sync::atomic::AtomicU32,
     handshake_done: bool,
-    peer_info: Option<HandshakePayload>,
 }
 
 impl QuicConnection {
-    pub fn new(connection: Connection, config: NetworkConfig) -> Self {
+    pub fn new(connection: Connection, _config: NetworkConfig) -> Self {
         Self {
             connection,
-            send_stream: tokio::sync::Mutex::new(None),
-            recv_stream: tokio::sync::Mutex::new(None),
-            config,
             sequence: std::sync::atomic::AtomicU32::new(0),
             handshake_done: false,
-            peer_info: None,
         }
     }
 
@@ -75,7 +63,6 @@ impl QuicConnection {
 
         let ack_payload = response.decode_handshake_ack()?;
         self.handshake_done = true;
-        self.peer_info = Some(ack_payload.clone());
         Ok(ack_payload)
     }
 
@@ -116,7 +103,6 @@ impl QuicConnection {
         send.finish()
             .map_err(|e| NetworkError::Stream(format!("HandshakeAck finish failed: {e}")))?;
         self.handshake_done = true;
-        self.peer_info = Some(peer_payload.clone());
         Ok(peer_payload)
     }
     // отправление - нужен переводчик (translator.rs)

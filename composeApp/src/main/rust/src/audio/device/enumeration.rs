@@ -1,7 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::Device;
 use crate::audio::config::types::{AudioDevice, AudioError};
-use log::{info};
 use std::collections::HashSet;
 
 // getMinBufferSize(): Invalid channel configuration
@@ -73,16 +72,3 @@ pub fn list_output_devices() -> Result<Vec<AudioDevice>, AudioError> {
     Ok(devices)
 }
 
-pub fn default_input_device() -> Result<AudioDevice, AudioError> {
-    let host = cpal::default_host();
-    let device = host.default_input_device()
-        .ok_or_else(|| AudioError::NoDevice { reason: "No default input device".into() })?;
-    device_to_audio_device(&device, true, "input")
-}
-
-pub fn default_output_device() -> Result<AudioDevice, AudioError> {
-    let host = cpal::default_host();
-    let device = host.default_output_device()
-        .ok_or_else(|| AudioError::NoDevice { reason: "No default output device".into() })?;
-    device_to_audio_device(&device, true, "output")
-}

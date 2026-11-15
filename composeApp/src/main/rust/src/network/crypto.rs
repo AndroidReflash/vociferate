@@ -49,7 +49,6 @@ impl CryptoManager {
     fn build_server_config(
             cert_der: CertificateDer<'static>,
             key_der: PrivateKeyDer<'static>,
-            // Можно передавать duration аргументами или брать из конфига
             idle_timeout_ms: u64,
             keep_alive_ms: u64,
     ) -> Result<QuinnServerConfig> {
@@ -72,9 +71,7 @@ impl CryptoManager {
 }
 
 #[derive(Debug)]
-struct SkipHostnameVerifier {
-    roots: Arc<rustls::RootCertStore>,
-}
+struct SkipHostnameVerifier;
 
 impl ServerCertVerifier for SkipHostnameVerifier {
     fn verify_server_cert(
@@ -115,10 +112,10 @@ impl ServerCertVerifier for SkipHostnameVerifier {
     }
 }
 
-pub fn make_client_config(roots: Arc<rustls::RootCertStore>) -> Result<QuinnClientConfig> {
+pub fn make_client_config(_roots: Arc<rustls::RootCertStore>) -> Result<QuinnClientConfig> {
     let crypto = rustls::ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(SkipHostnameVerifier { roots }))
+        .with_custom_certificate_verifier(Arc::new(SkipHostnameVerifier))
         .with_no_client_auth();
 
     let quic_client_config = QuicClientConfig::try_from(Arc::new(crypto))

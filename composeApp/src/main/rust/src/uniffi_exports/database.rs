@@ -1,8 +1,6 @@
-//! Database UniFFI exports
-
-use crate::database::database::{DeviceDatabase, DbError};
-use crate::uniffi_exports::{VoiceError, DEVICE_DB, SETTING_KEY_DEVICE_NAME, get_db};
-use std::sync::Arc;
+use crate::database::database::DeviceDatabase;
+use crate::uniffi_exports::error::VoiceError;
+use crate::uniffi_exports::state::{get_db, init_device_db, SETTING_KEY_DEVICE_NAME};
 
 #[uniffi::export]
 pub fn init_database(path: String) -> Result<(), VoiceError> {
@@ -19,8 +17,7 @@ pub fn init_database(path: String) -> Result<(), VoiceError> {
 
     crate::network::config::init_device_id(Some(device_id));
 
-    let mut guard = DEVICE_DB.lock().unwrap();
-    *guard = Some(Arc::new(db));
+    init_device_db(db);
     Ok(())
 }
 

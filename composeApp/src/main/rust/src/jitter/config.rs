@@ -22,24 +22,13 @@ impl Default for JitterBufferConfig {
 }
 
 impl JitterBufferConfig {
-    pub fn new(capacity_frames: u32, target_delay_frames: u32) -> Self {
+    pub fn new(_capacity_frames: u32, target_delay_frames: u32) -> Self {
         Self {
-            capacity_frames,
+            capacity_frames: 200,
             target_delay_frames,
             min_delay_frames: target_delay_frames.saturating_sub(1),
             max_delay_frames: target_delay_frames.saturating_mul(2).max(4),
             adaptive: true,
         }
-    }
-
-    pub fn with_adaptive(mut self, adaptive: bool) -> Self {
-        self.adaptive = adaptive;
-        self
-    }
-
-    pub fn with_bounds(mut self, min_delay_frames: u32, max_delay_frames: u32) -> Self {
-        self.min_delay_frames = min_delay_frames;
-        self.max_delay_frames = max_delay_frames;
-        self
     }
 }

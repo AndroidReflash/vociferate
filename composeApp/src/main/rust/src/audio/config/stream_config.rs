@@ -1,5 +1,5 @@
 use cpal::traits::DeviceTrait;
-use cpal::{Device, SampleRate, StreamConfig, SupportedStreamConfig};
+use cpal::{Device, StreamConfig, SupportedStreamConfig};
 use super::types::{AudioConfig, AudioError};
 
 pub fn build_stream_config(_config: &AudioConfig, device_config: &SupportedStreamConfig) -> StreamConfig {
@@ -8,7 +8,7 @@ pub fn build_stream_config(_config: &AudioConfig, device_config: &SupportedStrea
     stream_config
 }
 
-pub fn find_compatible_config(device: &Device, config: &AudioConfig, kind: &str) -> Result<SupportedStreamConfig, AudioError> {
+pub fn find_compatible_config(device: &Device, _config: &AudioConfig, kind: &str) -> Result<SupportedStreamConfig, AudioError> {
     if kind == "input" {
         let default_config = device.default_input_config()
             .map_err(|e| AudioError::Cpal { reason: e.to_string() })?;
@@ -19,7 +19,7 @@ pub fn find_compatible_config(device: &Device, config: &AudioConfig, kind: &str)
             default_config.sample_format()
         );
 
-        return Ok(default_config)
+        Ok(default_config)
     } else {
         let default_config = device.default_output_config()
             .map_err(|e| AudioError::Cpal { reason: e.to_string() })?;
@@ -30,10 +30,6 @@ pub fn find_compatible_config(device: &Device, config: &AudioConfig, kind: &str)
             default_config.sample_format()
         );
 
-        return Ok(default_config);
+        Ok(default_config)
     }
-
-    Err(AudioError::FormatNotSupported {
-        reason: format!("No compatible config for {}ch @ {}Hz", config.channels, config.sample_rate),
-    })
 }
